@@ -3,6 +3,18 @@ from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
 import tensorflow as tf
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib
+import random
+
+
+def random_color():
+    names = {}
+    idx = 0
+    for name, hex in matplotlib.colors.cnames.items():
+        names[idx] = name
+        idx += 1
+    return names[random.randint(0, idx)]
 
 
 def get_distance(lng1, lat1, lng2, lat2):
@@ -112,17 +124,39 @@ def evaluate(y_pred, y_test, max_grids):
         f_measurement = 0
     else:
         f_measurement = 2 * precision * recall / (precision + recall)
-    return [round(precision, 4), round(recall, 4), round(f_measurement, 4), round(sum(y == y_test) / len(y_test), 4)]
+    return [round(precision, 4), round(recall, 4), round(f_measurement, 4),
+            round(sum(y_pred == y_test) / len(y_test), 4)]
 
+
+def make_precise_picture(precises, names):
+    plt.figure(figsize=(15, 8))
+    length = precises.shape[0]
+    x1 = [i - 0.3 for i in range(1, length + 1)]
+    x2 = [i - 0.1 for i in range(1, length + 1)]
+    x3 = [i + 0.1 for i in range(1, length + 1)]
+    x4 = [i + 0.3 for i in range(1, length + 1)]
+    l1 = plt.bar(x=x1, height=precises[:, 0].tolist(), width=0.2, color=random_color(), label='precise')
+    l2 = plt.bar(x=x2, height=precises[:, 1].tolist(), width=0.2, color=random_color(), label='recall')
+    l3 = plt.bar(x=x3, height=precises[:, 2].tolist(), width=0.2, color=random_color(), label='f-measurement')
+    l4 = plt.bar(x=x4, height=precises[:, 3].tolist(), width=0.2, color=random_color(), label='accurate')
+    plt.xlabel('convolution way')
+    plt.ylabel('score (%)')
+    plt.title('Result comparison histogram')
+    plt.xticks(x2, names)
+    for index in range(length):
+        plt.text(x1[index], precises[index, 0], '%.2f' % precises[index, 0], ha='center', va='bottom')
+        plt.text(x2[index], precises[index, 1], '%.2f' % precises[index, 1], ha='center', va='bottom')
+        plt.text(x3[index], precises[index, 2], '%.2f' % precises[index, 2], ha='center', va='bottom')
+        plt.text(x4[index], precises[index, 3], '%.2f' % precises[index, 3], ha='center', va='bottom')
+    plt.legend(handles=[l1, l2, l3, l4], labels=['precise', 'recall', 'f-measurement', 'accurate'], loc='best')
+    plt.show()
 
 
 def conv():
     in_channels = 1
-    channel_multiplier = tmp_size
-    # 卷积核的大小
-    conv_size = [2, 2]
-    # 卷积层 + 激活层
-    conv_filter_w1 = tf.Variable(tf.random_normal(conv_size + [in_channels, channel_multiplier]))
+    channel_multiplier = initial_out_channels
+    # convolution layer 1 + activate layer 1
+    conv_filter_w1 = tf.Variable(tf.random_normal(convolution_size + [in_channels, channel_multiplier]))
     conv_filter_b1 = tf.Variable(tf.random_normal([channel_multiplier]))
     conv_out1 = tf.nn.conv2d(tf_X, conv_filter_w1, strides=[1, 1, 1, 1], padding='SAME')
 
@@ -131,14 +165,14 @@ def conv():
     conv_size = [relu_feature_maps1.shape[1].value, relu_feature_maps1.shape[2].value]
 
     in_channels_2 = channel_multiplier
-    channel_multiplier_2 = tmp_size
-    # 卷积层2
-    conv_filter_w2 = tf.Variable(tf.random_normal(conv_size + [in_channels_2, channel_multiplier]))
+    channel_multiplier_2 = initial_out_channels
+    # convolution layer 2
+    conv_filter_w2 = tf.Variable(tf.random_normal(conv_size + [in_channels_2, channel_multiplier_2]))
     conv_out2 = tf.nn.conv2d(relu_feature_maps1, conv_filter_w2, strides=[1, 1, 1, 1], padding='SAME')
-    b2_size = in_channels * channel_multiplier
+    b2_size = in_channels * channel_multiplier_2
     conv_filter_b2 = tf.Variable(tf.random_normal([b2_size]))
     conv_out2 = conv_out2 + conv_filter_b2
-    # BN归一化层 + 激活层
+    # BN + activate layer 1
     batch_mean, batch_var = tf.nn.moments(conv_out2, [0, 1, 2], keep_dims=True)
     shift = tf.Variable(tf.zeros([b2_size]))
     scale = tf.Variable(tf.ones([b2_size]))
@@ -151,7 +185,7 @@ def conv():
 
     max_pool2_flat = tf.reshape(relu_BN_maps2, [-1, relu_BN_maps2_size * b2_size])
 
-    # 全连接层
+    # all connection layer
     fc_w1 = tf.Variable(tf.random_normal([relu_BN_maps2_size * b2_size, sample_size]))
     fc_b1 = tf.Variable(tf.random_normal([sample_size]))
     fc_out1 = tf.nn.relu6(tf.matmul(max_pool2_flat, fc_w1) + fc_b1)
@@ -167,33 +201,25 @@ def conv():
 
     y_pred = tf.argmax(pred, 1)
 
-    bool_pred = tf.equal(tf.argmax(tf_Y, 1), y_pred)
-    # 准确率
-    accuracy = tf.reduce_mean(tf.cast(bool_pred, tf.float32))
-
-    # 使用MBGD算法，设定batch_size为8
-    batch_size = 1000
+    res = []
     # run
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
-        # 迭代1000个周期
-        for epoch in range(1000):
-            # 每个周期进行 MBGD 算法
+        for epoch in range(epochs):
             for batch_xs, batch_ys in generatebatch(X, Y, Y.shape[0], batch_size):
                 sess.run(train_step, feed_dict={tf_X: batch_xs, tf_Y: batch_ys})
             if epoch % 10 == 0:
                 y = sess.run(y_pred, feed_dict={tf_X: X, tf_Y: Y})
                 res = evaluate(y, y_test, max_grids)
                 print(epoch, res)
+    return res
 
 
 def depth_conv():
     in_channels = 1
-    channel_multiplier = tmp_size
-    # 卷积核的大小
-    conv_size = [2, 2]
-    # 卷积层 + 激活层
-    conv_filter_w1 = tf.Variable(tf.random_normal(conv_size + [in_channels, channel_multiplier]))
+    channel_multiplier = initial_out_channels
+    # convolution layer 1 + activate layer 1
+    conv_filter_w1 = tf.Variable(tf.random_normal(convolution_size + [in_channels, channel_multiplier]))
     conv_filter_b1 = tf.Variable(tf.random_normal([channel_multiplier]))
     conv_out1 = tf.nn.depthwise_conv2d(tf_X, conv_filter_w1, strides=[1, 1, 1, 1], padding='SAME')
 
@@ -203,13 +229,13 @@ def depth_conv():
 
     in_channels_2 = channel_multiplier
     channel_multiplier_2 = channel_multiplier
-    # 卷积层2
+    # convolution layer 2
     conv_filter_w2 = tf.Variable(tf.random_normal(conv_size + [in_channels_2, channel_multiplier_2]))
     conv_out2 = tf.nn.depthwise_conv2d(relu_feature_maps1, conv_filter_w2, strides=[1, 1, 1, 1], padding='SAME')
     b2_size = in_channels_2 * channel_multiplier_2
     conv_filter_b2 = tf.Variable(tf.random_normal([b2_size]))
     conv_out2 = conv_out2 + conv_filter_b2
-    # BN归一化层 + 激活层
+    # BN + activate layer 1
     batch_mean, batch_var = tf.nn.moments(conv_out2, [0, 1, 2], keep_dims=True)
     shift = tf.Variable(tf.zeros([b2_size]))
     scale = tf.Variable(tf.ones([b2_size]))
@@ -222,12 +248,12 @@ def depth_conv():
 
     max_pool2_flat = tf.reshape(relu_BN_maps2, [-1, relu_BN_maps2_size * b2_size])
 
-    # 全连接层
+    # all connection layer
     fc_w1 = tf.Variable(tf.random_normal([relu_BN_maps2_size * b2_size, sample_size]))
     fc_b1 = tf.Variable(tf.random_normal([sample_size]))
     fc_out1 = tf.nn.relu6(tf.matmul(max_pool2_flat, fc_w1) + fc_b1)
 
-    # 输出层
+    # output layer
     out_w1 = tf.Variable(tf.random_normal([sample_size, sample_size]))
     out_b1 = tf.Variable(tf.random_normal([sample_size]))
     pred = tf.nn.softmax(tf.matmul(fc_out1, out_w1) + out_b1)
@@ -238,50 +264,42 @@ def depth_conv():
 
     y_pred = tf.argmax(pred, 1)
 
-    bool_pred = tf.equal(tf.argmax(tf_Y, 1), y_pred)
-    # 准确率
-    accuracy = tf.reduce_mean(tf.cast(bool_pred, tf.float32))
-
-    # 使用MBGD算法，设定batch_size为8
-    batch_size = 1000
+    res = []
     # run
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
-        # 迭代1000个周期
-        for epoch in range(1000):
-            # 每个周期进行 MBGD 算法
+        for epoch in range(epochs):
             for batch_xs, batch_ys in generatebatch(X, Y, Y.shape[0], batch_size):
                 sess.run(train_step, feed_dict={tf_X: batch_xs, tf_Y: batch_ys})
             if epoch % 10 == 0:
                 y = sess.run(y_pred, feed_dict={tf_X: X, tf_Y: Y})
                 res = evaluate(y, y_test, max_grids)
                 print(epoch, res)
+    return res
 
 
-def separable():
+def separable_convolution():
     in_channels = 1
-    channel_multiplier = tmp_size
-    # 卷积核的大小
-    conv_size = [2, 2]
-    # 卷积层 + 激活层
-    conv_filter_w1 = tf.Variable(tf.random_normal(conv_size + [in_channels, channel_multiplier]))
+    channel_multiplier = initial_out_channels
+    # convolution layer 1 + activate layer 1
+    conv_filter_w1 = tf.Variable(tf.random_normal(convolution_size + [in_channels, channel_multiplier]))
     # channel_multiplier
-    separabale_out_channel_multiplier = 20
+    separable_out_channel_multiplier = 20
     pointwise_filter = tf.Variable(
-        tf.random_normal([1, 1, in_channels * channel_multiplier, separabale_out_channel_multiplier]))
+        tf.random_normal([1, 1, in_channels * channel_multiplier, separable_out_channel_multiplier]))
     # shape=(?, 7, 7, 20)
     conv_out1 = tf.nn.separable_conv2d(tf_X, depthwise_filter=conv_filter_w1, pointwise_filter=pointwise_filter,
                                        strides=[1, 1, 1, 1], padding='SAME')
 
-    conv_filter_b1 = tf.Variable(tf.random_normal([separabale_out_channel_multiplier]))
+    conv_filter_b1 = tf.Variable(tf.random_normal([separable_out_channel_multiplier]))
 
     relu_feature_maps1 = tf.nn.relu6(conv_out1 + conv_filter_b1)
 
     conv_size = [relu_feature_maps1.shape[1].value, relu_feature_maps1.shape[2].value]
 
-    in_channels_2 = separabale_out_channel_multiplier
+    in_channels_2 = separable_out_channel_multiplier
     channel_multiplier_2 = channel_multiplier
-    # 卷积层2
+    # convolution layer 2
     # channel_multiplier
     separabale_out_channel_multiplier_2 = 140
     pointwise_filter_2 = tf.Variable(
@@ -293,10 +311,10 @@ def separable():
     b2_size = separabale_out_channel_multiplier_2
     conv_filter_b2 = tf.Variable(tf.random_normal([separabale_out_channel_multiplier_2]))
     conv_out2 = conv_out2 + conv_filter_b2
-    # BN归一化层 + 激活层
+    # BN + activate layer 1
     batch_mean, batch_var = tf.nn.moments(conv_out2, [0, 1, 2], keep_dims=True)
     shift = tf.Variable(tf.zeros([b2_size]))
-    scale = tf.Variable(tf.ones([b2_size]))
+    scale = tf.Variable(tf.zeros([b2_size]))
     epsilon = 1e-3
     BN_out = tf.nn.batch_normalization(conv_out2, batch_mean, batch_var, shift, scale, epsilon)
 
@@ -306,12 +324,12 @@ def separable():
 
     max_pool2_flat = tf.reshape(relu_BN_maps2, [-1, relu_BN_maps2_size * b2_size])
 
-    # 全连接层
+    # all connection layer
     fc_w1 = tf.Variable(tf.random_normal([relu_BN_maps2_size * b2_size, sample_size]))
     fc_b1 = tf.Variable(tf.random_normal([sample_size]))
     fc_out1 = tf.nn.relu6(tf.matmul(max_pool2_flat, fc_w1) + fc_b1)
 
-    # 输出层
+    # output layer
     out_w1 = tf.Variable(tf.random_normal([sample_size, sample_size]))
     out_b1 = tf.Variable(tf.random_normal([sample_size]))
     pred = tf.nn.softmax(tf.matmul(fc_out1, out_w1) + out_b1)
@@ -322,30 +340,36 @@ def separable():
 
     y_pred = tf.argmax(pred, 1)
 
-    bool_pred = tf.equal(tf.argmax(tf_Y, 1), y_pred)
-    # 准确率
-    accuracy = tf.reduce_mean(tf.cast(bool_pred, tf.float32))
-
-    # 使用MBGD算法，设定batch_size为8
-    batch_size = 1000
+    res = []
     # run
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
-        # 迭代1000个周期
-        for epoch in range(1000):
-            # 每个周期进行 MBGD 算法
+        for epoch in range(epochs):
             for batch_xs, batch_ys in generatebatch(X, Y, Y.shape[0], batch_size):
                 sess.run(train_step, feed_dict={tf_X: batch_xs, tf_Y: batch_ys})
             if epoch % 10 == 0:
                 y = sess.run(y_pred, feed_dict={tf_X: X, tf_Y: Y})
                 res = evaluate(y, y_test, max_grids)
                 print(epoch, res)
+    return res
+
+
+def draw_from_csv():
+    df = pd.read_csv('../output.csv', header=0)
+    values = df.values
+    precises = np.zeros((values.shape[0], values.shape[1] - 1))
+    conv_names = []
+    for i in range(len(values)):
+        precises[i] = np.array(values[i][1:])
+        conv_names.append(values[i][0])
+    # draw comparable picture
+    make_precise_picture(precises, conv_names)
 
 
 if __name__ == '__main__':
     grid_stride = 150
     # read data
-    dataDf = pd.read_csv('data_2g.csv', header=0, dtype={'RNCID_1': np.object, 'CellID_1': np.object,
+    dataDf = pd.read_csv('../data_2g.csv', header=0, dtype={'RNCID_1': np.object, 'CellID_1': np.object,
                                                          'RNCID_2': np.object, 'CellID_2': np.object,
                                                          'RNCID_3': np.object, 'CellID_3': np.object,
                                                          'RNCID_4': np.object, 'CellID_4': np.object,
@@ -353,7 +377,7 @@ if __name__ == '__main__':
                                                          'RNCID_6': np.object, 'CellID_6': np.object,
                                                          'RNCID_7': np.object, 'CellID_7': np.object})
 
-    gongcanDf = pd.read_csv('2g_gongcan.csv', header=0, dtype={'RNCID': np.object, 'CellID': np.object})
+    gongcanDf = pd.read_csv('../2g_gongcan.csv', header=0, dtype={'RNCID': np.object, 'CellID': np.object})
     # get gongcan data
     gongcanMap = get_gongcan_map(gongcanDf)
 
@@ -382,14 +406,7 @@ if __name__ == '__main__':
     X_data = scaler.fit_transform(data)
     Y_tmp = labels[:, 0].reshape(-1, 1)
 
-    width = colGridSize * rowGridSize
-
-    Y = np.zeros((size, width))
-    # onehot 编码
-    # for i in range(Y_tmp.shape[0]):
-    #     Y_column = np.zeros((1, width))
-    #     Y_column[0][int(Y_tmp[i][0])] = 1
-    #     Y[i] = Y_column[0]
+    # one hot code
     Y = OneHotEncoder().fit_transform(Y_tmp).todense()
 
     y_test = []
@@ -399,16 +416,35 @@ if __name__ == '__main__':
     grid = {}
     for i in range(Y.shape[1]):
         grid[i] = Y[:, i].sum()
-    #
+    # get the ten max grid meta data
     max_grids = get_max_grids(grid)
-
+    # reshape the data
     X = X_data.reshape(-1, 7, 7, 1)
-
+    # sample size
     sample_size = Y.shape[1]
 
-    tmp_size = sample_size // 8
+    initial_out_channels = sample_size // 8
 
     tf.reset_default_graph()
-    # 输入层
+    # input layer
     tf_X = tf.placeholder(tf.float32, [None, 7, 7, 1])
     tf_Y = tf.placeholder(tf.float32, [None, sample_size])
+    # use MGDB algorithm, set the batch size is 1000
+    batch_size = 1
+    # convolution size
+    convolution_size = [2, 2]
+    # the number of iterators
+    epochs = 1
+    # result
+    res = []
+    # title
+    conv_names = ['conv2d', 'depth_conv2d', 'separable_conv2d']
+    # conv2d
+    res.append(conv())
+    # depth_conv2d
+    res.append(depth_conv())
+    # separable_conv2d
+    res.append(separable_convolution())
+    precises = np.array(res)
+    # draw comparable picture
+    make_precise_picture(precises, conv_names)
